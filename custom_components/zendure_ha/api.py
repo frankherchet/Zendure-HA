@@ -21,12 +21,16 @@ from paho.mqtt import enums as mqtt_enums
 
 from .const import (
     CONF_APPTOKEN,
+    CONF_DEVICE_KEY,
+    CONF_DEVICE_NAME,
     CONF_HAKEY,
     CONF_MQTTLOG,
     CONF_MQTTPORT,
     CONF_MQTTPSW,
     CONF_MQTTSERVER,
     CONF_MQTTUSER,
+    CONF_PRODUCT_KEY,
+    CONF_PRODUCT_MODEL,
     CONF_WIFIPSW,
     CONF_WIFISSID,
     DOMAIN,
@@ -84,10 +88,12 @@ class Api:
     def Init(self, data: Mapping[str, Any], mqtt: Mapping[str, Any]) -> None:
         """Initialize Zendure Api."""
         Api.mqttLogging = data.get(CONF_MQTTLOG, False)
-        Api.mqttCloud.__init__(mqtt_enums.CallbackAPIVersion.VERSION2, mqtt["clientId"], False, "cloud", mqtt_enums.MQTTProtocolVersion.MQTTv31)
-        url = mqtt["url"]
-        Api.cloudServer, Api.cloudPort = url.rsplit(":", 1) if ":" in url else (url, "1883")
-        self.mqttInit(Api.mqttCloud, Api.cloudServer, Api.cloudPort, mqtt["username"], mqtt["password"])
+        
+        if CONF_DEVICE_KEY not in data:
+            Api.mqttCloud.__init__(mqtt_enums.CallbackAPIVersion.VERSION2, mqtt["clientId"], False, "cloud", mqtt_enums.MQTTProtocolVersion.MQTTv31)
+            url = mqtt["url"]
+            Api.cloudServer, Api.cloudPort = url.rsplit(":", 1) if ":" in url else (url, "1883")
+            self.mqttInit(Api.mqttCloud, Api.cloudServer, Api.cloudPort, mqtt["username"], mqtt["password"])
 
         # Get wifi settings
         Api.wifissid = data.get(CONF_WIFISSID, "")
@@ -106,11 +112,29 @@ class Api:
     @staticmethod
     async def Connect(hass: HomeAssistant, data: dict[str, Any], reload: bool) -> dict[str, Any] | None:
         """Connect to the Zendure API."""
-        try:
-            devices = await Api.ApiHA(hass, data)
-        except Exception:  # pylint: disable=broad-except
-            _LOGGER.error("Failed to connect to Zendure API")
-            return None
+        if CONF_DEVICE_KEY in data:
+            devices = {
+                "deviceList": [
+                    {
+                        "deviceKey": data[CONF_DEVICE_KEY],
+                        "productKey": data[CONF_PRODUCT_KEY],
+                        "productModel": data[CONF_PRODUCT_MODEL],
+                        "deviceName": data[CONF_DEVICE_NAME],
+                    }
+                ],
+                "mqtt": {
+                    "url": f"{data[CONF_MQTTSERVER]}:{data[CONF_MQTTPORT]}",
+                    "username": data[CONF_MQTTUSER],
+                    "password": data.get(CONF_MQTTPSW, ""),
+                    "clientId": f"zendure_{data[CONF_DEVICE_KEY]}",
+                },
+            }
+        else:
+            try:
+                devices = await Api.ApiHA(hass, data)
+            except Exception:  # pylint: disable=broad-except
+                _LOGGER.error("Failed to connect to Zendure API")
+                return None
 
         # Open the storage
         if reload:

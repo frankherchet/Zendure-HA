@@ -17,6 +17,10 @@ CONF_MQTTUSER = "mqttuser"
 CONF_MQTTPSW = "mqttpsw"
 CONF_WIFISSID = "wifissid"
 CONF_WIFIPSW = "wifipsw"
+CONF_DEVICE_NAME = "device_name"
+CONF_DEVICE_KEY = "device_key"
+CONF_PRODUCT_KEY = "product_key"
+CONF_PRODUCT_MODEL = "product_model"
 
 CONF_HAKEY = "C*dafwArEOXK"
 

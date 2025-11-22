@@ -13,17 +13,17 @@ from homeassistant.helpers import selector
 
 from .api import Api
 from .const import (
-    CONF_APPTOKEN,
-    CONF_MQTTLOCAL,
+    CONF_DEVICE_KEY,
+    CONF_DEVICE_NAME,
     CONF_MQTTLOG,
     CONF_MQTTPORT,
     CONF_MQTTPSW,
     CONF_MQTTSERVER,
     CONF_MQTTUSER,
     CONF_P1METER,
+    CONF_PRODUCT_KEY,
+    CONF_PRODUCT_MODEL,
     CONF_SIM,
-    CONF_WIFIPSW,
-    CONF_WIFISSID,
     DOMAIN,
 )
 from .manager import ZendureConfigEntry
@@ -36,32 +36,6 @@ class ZendureConfigFlow(ConfigFlow, domain=DOMAIN):
 
     VERSION = 1
     _input_data: dict[str, Any]
-    data_schema = vol.Schema(
-        {
-            vol.Required(CONF_APPTOKEN): str,
-            vol.Required(CONF_P1METER, description={"suggested_value": "sensor.power_actual"}): selector.EntitySelector(),
-            vol.Required(CONF_MQTTLOG): bool,
-            vol.Required(CONF_MQTTLOCAL): bool,
-        }
-    )
-    mqtt_schema = vol.Schema(
-        {
-            vol.Required(CONF_MQTTSERVER): str,
-            vol.Required(CONF_MQTTPORT, default=1883): int,
-            vol.Required(CONF_MQTTUSER): str,
-            vol.Optional(CONF_MQTTPSW): selector.TextSelector(
-                selector.TextSelectorConfig(
-                    type=selector.TextSelectorType.PASSWORD,
-                ),
-            ),
-            vol.Optional(CONF_WIFISSID): str,
-            vol.Optional(CONF_WIFIPSW): selector.TextSelector(
-                selector.TextSelectorConfig(
-                    type=selector.TextSelectorType.PASSWORD,
-                ),
-            ),
-        }
-    )
 
     def __init__(self) -> None:
         """Initialize."""
@@ -74,69 +48,87 @@ class ZendureConfigFlow(ConfigFlow, domain=DOMAIN):
             self._user_input = user_input
 
             try:
-                if await Api.Connect(self.hass, self._user_input, False) is None:
-                    errors["base"] = "invalid input"
-                else:
-                    localmqtt = user_input[CONF_MQTTLOCAL]
-                    if localmqtt:
-                        return await self.async_step_local()
+                # Validate connection (optional, maybe just check if we can connect to MQTT?)
+                # For now, we assume the input is correct and proceed to create the entry.
+                # We might want to verify MQTT connection here.
 
-                    await self.async_set_unique_id("Zendure", raise_on_progress=False)
-                    self._abort_if_unique_id_configured()
-                    return self.async_create_entry(title="Zendure", data=self._user_input)
-
-            except Exception as err:  # pylint: disable=broad-except
-                errors["base"] = f"invalid input {err}"
-
-        return self.async_show_form(step_id="user", data_schema=self.data_schema, errors=errors)
-
-    async def async_step_local(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
-        errors: dict[str, str] = {}
-        if user_input is not None and user_input.get(CONF_MQTTSERVER, None) is not None:
-            try:
-                self._user_input = self._user_input | user_input if self._user_input else user_input
-                if await Api.Connect(self.hass, self._user_input, False) is None:
-                    errors["base"] = "invalid input"
-            except Exception as err:  # pylint: disable=broad-except
-                errors["base"] = f"invalid input {err}"
-            else:
                 await self.async_set_unique_id("Zendure", raise_on_progress=False)
                 self._abort_if_unique_id_configured()
                 return self.async_create_entry(title="Zendure", data=self._user_input)
 
-        return self.async_show_form(step_id="local", data_schema=self.mqtt_schema, errors=errors)
+            except Exception as err:  # pylint: disable=broad-except
+                errors["base"] = f"invalid input {err}"
+
+        schema = vol.Schema(
+            {
+                vol.Required(CONF_MQTTSERVER): str,
+                vol.Required(CONF_MQTTPORT, default=1883): int,
+                vol.Required(CONF_MQTTUSER): str,
+                vol.Optional(CONF_MQTTPSW): selector.TextSelector(
+                    selector.TextSelectorConfig(
+                        type=selector.TextSelectorType.PASSWORD,
+                    ),
+                ),
+                vol.Required(CONF_DEVICE_NAME): str,
+                vol.Required(CONF_DEVICE_KEY): str,
+                vol.Required(CONF_PRODUCT_KEY): str,
+                vol.Required(CONF_PRODUCT_MODEL): selector.SelectSelector(
+                    selector.SelectSelectorConfig(
+                        options=sorted(list(Api.createdevice.keys())),
+                        mode=selector.SelectSelectorMode.DROPDOWN,
+                    ),
+                ),
+                vol.Required(CONF_P1METER, description={"suggested_value": "sensor.power_actual"}): selector.EntitySelector(),
+                vol.Required(CONF_MQTTLOG): bool,
+            }
+        )
+
+        return self.async_show_form(step_id="user", data_schema=schema, errors=errors)
 
     async def async_step_reconfigure(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
         """Add reconfigure step to allow to reconfigure a config entry."""
         errors: dict[str, str] = {}
 
         entry = self._get_reconfigure_entry()
-        schema = self.data_schema
+        
         if user_input is not None:
             self._user_input = self._user_input | user_input
-        if user_input is not None:
-            use_mqtt = user_input.get(CONF_MQTTLOCAL, False)
-            if use_mqtt:
-                schema = self.mqtt_schema
-            else:
-                try:
-                    if await Api.Connect(self.hass, self._user_input, False) is None:
-                        errors["base"] = "invalid input"
-                except Exception as err:  # pylint: disable=broad-except
-                    _LOGGER.error(f"Unexpected exception: {err}")
-                    errors["base"] = f"invalid input {err}"
-                else:
-                    await self.async_set_unique_id("Zendure", raise_on_progress=False)
-                    self._abort_if_unique_id_mismatch()
+            
+            try:
+                await self.async_set_unique_id("Zendure", raise_on_progress=False)
+                self._abort_if_unique_id_mismatch()
 
-                    return self.async_update_reload_and_abort(entry, data=self._user_input)
+                return self.async_update_reload_and_abort(entry, data=self._user_input)
+            except Exception as err:
+                 errors["base"] = f"invalid input {err}"
+
+        schema = vol.Schema(
+            {
+                vol.Required(CONF_MQTTSERVER, default=entry.data.get(CONF_MQTTSERVER)): str,
+                vol.Required(CONF_MQTTPORT, default=entry.data.get(CONF_MQTTPORT, 1883)): int,
+                vol.Required(CONF_MQTTUSER, default=entry.data.get(CONF_MQTTUSER)): str,
+                vol.Optional(CONF_MQTTPSW, default=entry.data.get(CONF_MQTTPSW)): selector.TextSelector(
+                    selector.TextSelectorConfig(
+                        type=selector.TextSelectorType.PASSWORD,
+                    ),
+                ),
+                vol.Required(CONF_DEVICE_NAME, default=entry.data.get(CONF_DEVICE_NAME)): str,
+                vol.Required(CONF_DEVICE_KEY, default=entry.data.get(CONF_DEVICE_KEY)): str,
+                vol.Required(CONF_PRODUCT_KEY, default=entry.data.get(CONF_PRODUCT_KEY)): str,
+                vol.Required(CONF_PRODUCT_MODEL, default=entry.data.get(CONF_PRODUCT_MODEL)): selector.SelectSelector(
+                    selector.SelectSelectorConfig(
+                        options=sorted(list(Api.createdevice.keys())),
+                        mode=selector.SelectSelectorMode.DROPDOWN,
+                    ),
+                ),
+                vol.Required(CONF_P1METER, default=entry.data.get(CONF_P1METER)): selector.EntitySelector(),
+                vol.Required(CONF_MQTTLOG, default=entry.data.get(CONF_MQTTLOG)): bool,
+            }
+        )
 
         return self.async_show_form(
             step_id="reconfigure",
-            data_schema=self.add_suggested_values_to_schema(
-                data_schema=schema,
-                suggested_values=entry.data | (user_input or {}),
-            ),
+            data_schema=schema,
             errors=errors,
         )
 
